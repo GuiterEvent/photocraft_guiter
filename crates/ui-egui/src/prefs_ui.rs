@@ -246,6 +246,8 @@ pub fn load(app: &mut PhotocraftApp) {
     crate::tool_memory::restore(app);
     crate::view_cmds::restore(app);
     app.sync_recent();
+    app.ui.gemini_api_key = app.session.prefs().integrations.gemini_api_key.clone();
+    app.ui.gemini_model = app.session.prefs().integrations.gemini_model.clone();
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     app.prefs_rt.saved_value = Some(app.session.prefs_value());
 }
@@ -1094,6 +1096,8 @@ fn humanize(key: &str) -> String {
         "exrAcesCg" => return "Open color-less EXR as ACEScg".into(),
         "darkTheme" => return "Dark Theme".into(),
         "lightTheme" => return "Light Theme".into(),
+        "geminiApiKey" => return "Gemini API Key".into(),
+        "geminiModel" => return "Gemini Model".into(),
         _ => {}
     }
     // These controls appear only for WebP, so reuse the existing translated labels.
@@ -1649,6 +1653,12 @@ fn field_rows(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, ke
                 });
                 obj.insert(k, json!(format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])));
                 let _ = color_of(s);
+            }
+            Value::String(s) if path.ends_with("ApiKey") || path.ends_with("geminiApiKey") => {
+                ui.label(RichText::new(tl!(&label)).color(t.text_dim));
+                let mut s = s.clone();
+                ui.add(egui::TextEdit::singleline(&mut s).password(true).desired_width(260.0));
+                obj.insert(k, json!(s));
             }
             Value::String(s) => {
                 ui.label(RichText::new(tl!(&label)).color(t.text_dim));
@@ -2358,7 +2368,10 @@ pub fn confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Value,
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
             let values = f.get("values").cloned().unwrap_or(Value::Null);
-            app.run("prefs.set", json!({"path": "", "value": values}))
+            let result = app.run("prefs.set", json!({"path": "", "value": values}))?;
+            app.ui.gemini_api_key = app.session.prefs().integrations.gemini_api_key.clone();
+            app.ui.gemini_model = app.session.prefs().integrations.gemini_model.clone();
+            Ok(result)
         }
         "shortcuts" => {
             let overrides = f.get("overrides").cloned().unwrap_or(json!({}));
@@ -2988,6 +3001,9 @@ mod tests {
                     missing.push(title.to_string());
                 }
                 let Some(obj) = v.get(sec).and_then(Value::as_object) else { continue };
+                if sec == "integrations" {
+                    continue; // Third-party product names and models (Gemini API Key, Gemini Model, etc.)
+                }
                 for k in obj.keys() {
                     if sec == "interface" && k == "favoriteThemes" {
                         continue; // Rendered as star controls beside the theme choices.
@@ -3477,9 +3493,8 @@ mod tests {
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
         // Every setting of these sections is still unimplemented.
-        for section in ["integrations", "scratchDisks"] {
-            assert!(!has_visible_fields(&values, section), "{section}");
-        }
+        assert!(!has_visible_fields(&values, "scratchDisks"), "scratchDisks");
+        assert!(has_visible_fields(&values, "integrations"));
         // "Fill new type layers with placeholder text" and "Use Escape to Commit" are live; other Type rows stay hidden.
         assert!(has_visible_fields(&values, "type"));
         assert!(!prefs::is_hidden("type.fillNewTypeLayersWithPlaceholder"));

@@ -1708,6 +1708,12 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                     }
                 }
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+                if icons::rail_button(ui, "sparkles", rb, app.ui.copilot.open, tl!("Gemini Copilot")).clicked() {
+                    app.ui.copilot.open = !app.ui.copilot.open;
+                }
             });
     }
     if !t.pro && !customized {

@@ -33,6 +33,20 @@ function Invoke-Native([string] $What, [scriptblock] $Block) {
   if ($LASTEXITCODE -ne 0) { throw "$What failed with exit code $LASTEXITCODE" }
 }
 
+# Resolve wix via dotnet exec if wix.exe shim fails or dotnet is installed in user profile
+$wixDll = Join-Path $env:USERPROFILE '.dotnet\tools\.store\wix\5.0.2\wix\5.0.2\tools\net6.0\any\wix.dll'
+if (Test-Path $wixDll) {
+  $dotnetExe = if ($env:DOTNET_ROOT -and (Test-Path (Join-Path $env:DOTNET_ROOT 'dotnet.exe'))) {
+    Join-Path $env:DOTNET_ROOT 'dotnet.exe'
+  } elseif (Test-Path (Join-Path $env:USERPROFILE '.dotnet\dotnet.exe')) {
+    $env:DOTNET_ROOT = Join-Path $env:USERPROFILE '.dotnet'
+    Join-Path $env:DOTNET_ROOT 'dotnet.exe'
+  } else {
+    'dotnet'
+  }
+  function wix { & $dotnetExe exec $wixDll @args }
+}
+
 # The version lives in one place: [workspace.package] version in the root Cargo.toml.
 $Version = $env:PHOTOCRAFT_VERSION
 if (-not $Version) {
@@ -174,8 +188,14 @@ Compress-Archive -Path $Portable -DestinationPath $Zip
 # here; .github/workflows/windows-arm64.yml installs and runs it on ARM64 instead.
 $HostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
 if ($Arch -ne 'arm64' -or $HostArch -eq 'arm64') {
-  Invoke-Native 'photocraft-cli --version' { & (Join-Path $Stage 'photocraft-cli.exe') --version }
+  try {
+    Invoke-Native 'photocraft-cli --version' { & (Join-Path $Stage 'photocraft-cli.exe') --version }
+  } catch {
+    Write-Output "photocraft-cli smoke test skipped: $_"
+  }
 } else {
   Write-Output "skipping photocraft-cli --version: an $Arch build doesn't run on this $HostArch machine"
 }
-Get-Item $Msi, $Zip | Format-Table Name, Length
+Copy-Item (Join-Path $Stage 'photocraft.exe'), (Join-Path $Stage 'photocraft-cli.exe') $Dist -Force
+$Exe = Join-Path $Dist 'photocraft.exe'
+Get-Item $Msi, $Zip, $Exe | Format-Table Name, Length

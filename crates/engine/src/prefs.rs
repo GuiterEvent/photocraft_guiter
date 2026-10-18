@@ -874,6 +874,12 @@ impl Default for RawDefaults {
     }
 }
 
+pub const GEMINI_MODELS: &[&str] = &["gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.5-pro", "gemini-2.0-flash"];
+
+pub fn default_gemini_model() -> String {
+    "gemini-2.5-flash".to_string()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Integrations {
@@ -881,11 +887,20 @@ pub struct Integrations {
     pub allow_agent_control: bool,
     /// Default control port (0 = only when `--control` is given).
     pub control_port: u32,
+    /// Gemini API key for assistant features.
+    pub gemini_api_key: String,
+    /// Selected Gemini model.
+    pub gemini_model: String,
 }
 
 impl Default for Integrations {
     fn default() -> Self {
-        Self { allow_agent_control: true, control_port: 0 }
+        Self {
+            allow_agent_control: true,
+            control_port: 0,
+            gemini_api_key: String::new(),
+            gemini_model: default_gemini_model(),
+        }
     }
 }
 
@@ -1098,6 +1113,7 @@ pub fn choices(path: &str) -> Option<&'static [&'static str]> {
         "performance.gpuBackend" => GpuBackend::NAMES,
         "performance.linuxDisplayServer" => LinuxDisplayServer::NAMES,
         "performance.renderingMode" => RenderingMode::NAMES,
+        "integrations.geminiModel" => GEMINI_MODELS,
         _ => return None,
     })
 }

@@ -10,19 +10,66 @@ use egui::{CornerRadius, Margin, Rect, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 
 use crate::PhotocraftApp;
-use crate::gemini::GeminiError;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::gemini::GeminiClient;
-use crate::icons;
-use crate::menus::MenuItem;
+use crate::gemini::GeminiError;
 use crate::state::{ChatImageAttachment, ChatMessage, ChatRole};
 use crate::theme::{self, Tokens};
-use crate::widgets;
+use craft::menu::{ItemKind, Row};
+
+mod icons {
+    use craft::behavior::IconId;
+    use craft::ui::buttons::IconButton;
+    use craft::ui::contract::{Props as _, Show as _};
+    use craft::ui::display::Icon;
+    use craft::ui::primitives::IconSpec;
+    use egui::{Color32, Rect, Response, Ui};
+
+    fn resolve_name(name: &'static str) -> &'static str {
+        match name {
+            "rotate-cw" => "rotate_cw",
+            "sliders-horizontal" => "adjustments",
+            other => other,
+        }
+    }
+
+    pub fn paint(ui: &mut Ui, rect: Rect, name: &'static str, _size: f32, _color: Color32) {
+        let icon = IconId::new(resolve_name(name));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            Icon::new(IconSpec::svg(icon)).show(ui);
+        });
+    }
+
+    pub fn button(ui: &mut Ui, name: &'static str, _size: f32, _active: bool, tooltip: &str) -> Response {
+        let icon = IconId::new(resolve_name(name));
+        IconButton::new(icon).label(tooltip.to_owned()).tooltip(tooltip.to_owned()).show(ui).response
+    }
+}
+
+mod widgets {
+    use craft::theme::Variant;
+    use craft::ui::buttons::Button;
+    use craft::ui::contract::{Props as _, Show as _};
+    use craft::ui::display::Divider;
+    use egui::{Response, Ui};
+
+    pub fn hairline(ui: &mut Ui) {
+        Divider::horizontal().show(ui);
+    }
+
+    pub fn primary_button(ui: &mut Ui, label: &str, _min_width: f32) -> Response {
+        Button::new(label.to_owned()).variant(Variant::PRIMARY).show(ui).response
+    }
+
+    pub fn secondary_button(ui: &mut Ui, label: &str, _min_width: f32) -> Response {
+        Button::new(label.to_owned()).show(ui).response
+    }
+}
 
 pub const PANEL_ID: &str = "window.panel.geminiCopilot";
 
 fn copilot_channel_id() -> egui::Id {
-    egui::Id::new("photocraft-gemini-copilot-channel")
+    egui::Id::unique("photocraft-gemini-copilot-channel")
 }
 
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -84,24 +131,13 @@ pub fn menu(app: &mut PhotocraftApp, id: &str, params: &Value) -> Option<Result<
 }
 
 /// Inserts the Gemini Copilot item into the Window menu list.
-pub fn insert_menu_items(app: &PhotocraftApp, items: &mut Vec<MenuItem>) {
-    let at = items
+pub fn rows(app: &PhotocraftApp, rows: &mut Vec<Row>) {
+    let at = rows
         .iter()
-        .rposition(|i| i.path.first().map(|s| s.as_str()) == Some("Window") && i.id.starts_with("window.panel."))
-        .unwrap_or(items.len());
-    let idx = (at + 1).min(items.len());
-    items.insert(
-        idx,
-        MenuItem {
-            id: PANEL_ID.into(),
-            label: "Gemini Copilot".into(),
-            path: vec!["Window".into()],
-            shortcut: None,
-            enabled: true,
-            checked: Some(app.ui.copilot.open),
-            color: None,
-        },
-    );
+        .rposition(|i| i.path.first().map(String::as_str) == Some("Window") && i.command.id.starts_with("window.panel."))
+        .unwrap_or(rows.len());
+    let idx = (at + 1).min(rows.len());
+    rows.insert(idx, Row::new(&["Window"], PANEL_ID, "Gemini Copilot").enabled(true).kind(ItemKind::Check(app.ui.copilot.open)));
 }
 
 /// Queries the active document state and metadata for Gemini Copilot.
@@ -970,7 +1006,7 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
     }
 
     egui::Window::new(tl!("Gemini Copilot"))
-        .id(egui::Id::new("photocraft-gemini-copilot-window"))
+        .id(egui::Id::unique("photocraft-gemini-copilot-window"))
         .title_bar(false)
         .resizable(true)
         .movable(!app.session.prefs().workspace_locked)
@@ -1051,7 +1087,7 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 ui.add_space(4.0);
             }
 
-            crate::widgets::hairline(ui);
+            widgets::hairline(ui);
             ui.add_space(4.0);
 
             // API key missing guidance banner
@@ -1167,7 +1203,7 @@ pub fn windows(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 });
 
             ui.add_space(4.0);
-            crate::widgets::hairline(ui);
+            widgets::hairline(ui);
             ui.add_space(3.0);
 
             // Visual action toolbar & preset prompts
@@ -1412,7 +1448,7 @@ fn get_or_load_attachment_texture(
     att: &ChatImageAttachment,
 ) -> Option<egui::TextureHandle> {
     let slice_len = att.base64_data.len().min(24);
-    let key_id = egui::Id::new(("copilot-att-tex", att.width, att.height, &att.base64_data[..slice_len]));
+    let key_id = egui::Id::unique(("copilot-att-tex", att.width, att.height, &att.base64_data[..slice_len]));
 
     let cached = ctx.data_mut(|d| d.get_temp::<egui::TextureHandle>(key_id));
     if let Some(tex) = cached {
@@ -1502,7 +1538,7 @@ fn render_expanded_image_modal(app: &mut PhotocraftApp, ctx: &egui::Context, t: 
     let title = att.label.as_deref().unwrap_or_else(|| tl!("Canvas Screenshot Preview"));
 
     egui::Window::new(title)
-        .id(egui::Id::new("copilot-expanded-image-modal"))
+        .id(egui::Id::unique("copilot-expanded-image-modal"))
         .title_bar(true)
         .resizable(true)
         .collapsible(false)

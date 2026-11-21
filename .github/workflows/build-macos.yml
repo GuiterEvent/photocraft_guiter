@@ -1,0 +1,105 @@
+name: Build macOS
+
+# Manual-only workflow for this fork: runs only when triggered via "Run workflow"
+# in the GitHub Actions UI. Never runs on push or schedule, and does not touch
+# any upstream workflow files.
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Target macOS architecture (aarch64 = Apple Silicon, universal = Both, x86_64 = Intel)"
+        type: choice
+        default: aarch64
+        options:
+          - aarch64
+          - universal
+          - x86_64
+      include_i18n_and_fonts:
+        description: "Bundle craft-i18n translations (incl. Traditional Chinese) and craft-fonts"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-macos-${{ github.ref }}-${{ inputs.arch }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: Build macOS (${{ inputs.arch }})
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: step-security/dtolnay-rust-toolchain@8dd607977d06adf4ed49b190381e74c17a9dd25f # v1.0.0
+        with:
+          toolchain: stable
+
+      - name: Add Rust macOS target(s)
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.arch }}" in
+            aarch64)   rustup target add aarch64-apple-darwin ;;
+            x86_64)    rustup target add x86_64-apple-darwin ;;
+            universal) rustup target add aarch64-apple-darwin x86_64-apple-darwin ;;
+          esac
+
+      - name: Ensure Rosetta for x86_64 CLI smoke test
+        if: inputs.arch == 'x86_64'
+        shell: bash
+        run: |
+          arch -x86_64 /usr/bin/true 2>/dev/null || softwareupdate --install-rosetta --agree-to-license
+
+      - name: Checkout craft-i18n and craft-fonts
+        if: inputs.include_i18n_and_fonts
+        shell: bash
+        run: |
+          set -euo pipefail
+          I18N_DIR="${RUNNER_TEMP}/craft-i18n"
+          FONTS_DIR="${RUNNER_TEMP}/craft-fonts"
+          I18N_REV="$(tr -d '[:space:]' < craft-i18n.rev)"
+          FONTS_REV="cc9269cd8d8258785dac603fba3122e5d2556795"
+
+          mkdir -p "$I18N_DIR" "$FONTS_DIR"
+
+          git -C "$I18N_DIR" init -q
+          git -C "$I18N_DIR" remote add origin https://github.com/storytold/craft-i18n.git
+          git -C "$I18N_DIR" fetch --depth 1 origin "$I18N_REV"
+          git -C "$I18N_DIR" checkout -q FETCH_HEAD
+
+          git -C "$FONTS_DIR" init -q
+          git -C "$FONTS_DIR" remote add origin https://github.com/storytold/craft-fonts.git
+          git -C "$FONTS_DIR" fetch --depth 1 origin "$FONTS_REV"
+          git -C "$FONTS_DIR" checkout -q FETCH_HEAD
+
+          echo "CRAFT_I18N_DIR=$I18N_DIR" >> "$GITHUB_ENV"
+          echo "CRAFT_FONTS_DIR=$FONTS_DIR" >> "$GITHUB_ENV"
+
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-macos-release
+          key: ${{ inputs.arch }}
+
+      - name: Build and package macOS DMG & CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash packaging/macos/package.sh --arch "${{ inputs.arch }}"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: photocraft-macos-${{ inputs.arch }}
+          retention-days: 30
+          path: |
+            dist/release/*.dmg
+            dist/release/*.zip

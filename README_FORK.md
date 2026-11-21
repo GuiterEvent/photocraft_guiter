@@ -16,6 +16,7 @@
 | **內建 AI 助理** | 僅支援外部 Agent 透過 CLI / 控制通道 / MCP 操控 | 內建 **Gemini Copilot** 視覺對話助理面板、串流回覆、Function Calling 與多步驟工作流 |
 | **Preferences 設定** | `Integrations` 頁僅包含 Agent / MCP 連線設定 | 擴充 `Integrations` 頁，新增密碼遮罩的 **Gemini API Key** 與 **Gemini Model** 選擇 |
 | **Windows 打包工具** | 僅提供 `packaging/windows/package.ps1` | 新增一鍵建置腳本 `build.bat`，並強化 `package.ps1` 的 WiX 偵測、容錯與獨立 `.exe` 輸出 |
+| **macOS 雲端建置** | 需透過全平台 `release.yml` 與組織簽章憑證 | 新增純手動觸發的 `.github/workflows/build-macos.yml`，可在 GitHub Actions 一鍵產出 `.dmg` 與 CLI |
 | **專案文件語言** | 以英文文件為主 | 額外新增 **97 份**繁體中文（台灣）`*_tw.md` 文件 |
 
 ---
@@ -72,7 +73,16 @@
 
 ---
 
-## 3. 繁體中文（台灣）專案文件
+## 3. macOS 雲端一鍵建置（GitHub Actions）
+
+- **新增 [`.github/workflows/build-macos.yml`](.github/workflows/build-macos.yml)**
+  - 純手動觸發（`workflow_dispatch`），不會因 `push` 或排程自動執行，也不會與上游 workflow 衝突。
+  - 在 GitHub 倉庫 **`Actions` → `Build macOS` → `Run workflow`** 可選擇架構（`aarch64` Apple Silicon、`universal` 雙架構通用、`x86_64` Intel），自動拉取 `craft-i18n` 與 `craft-fonts` 並呼叫 `packaging/macos/package.sh` 產出 `.dmg` 與 CLI `.zip` 供下載。
+  - 下載安裝到 `/Applications` 後，因屬 ad-hoc 簽章（未經 Apple Developer ID 公證），首次開啟前於 macOS 終端機執行 `xattr -cr /Applications/PhotoCraft.app` 即可正常啟動。
+
+---
+
+## 4. 繁體中文（台灣）專案文件
 
 本分支額外收錄了 **97 份**繁體中文文件（檔名皆以 `*_tw.md` 結尾，不覆蓋原版英文文件）：
 
@@ -92,6 +102,7 @@
 - `crates/ui-egui/src/copilot_ui.rs` — Gemini Copilot 浮動對話視窗、歷史抽屜、視覺預覽、工具確認卡片與工作流執行器
 - `crates/ui-egui/src/state/copilot.rs` — Copilot 會話、訊息、圖片附件、工具動作與工作流狀態資料結構
 - `build.bat` — Windows 一鍵建置與打包啟動腳本
+- `.github/workflows/build-macos.yml` — GitHub Actions 手動觸發 macOS `.dmg` 建置流程
 - `README_FORK.md` — 本分支差異說明文件
 
 ### 修改檔案

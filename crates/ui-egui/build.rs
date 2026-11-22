@@ -37,7 +37,8 @@ fn main() {
 /// The catalog this app reads in each locale: `locales/<locale>/photocraft.tsv`.
 const APP_CATALOG: &str = "photocraft.tsv";
 
-/// `CRAFT_I18N` from `CRAFT_I18N_DIR`: the `Embedded` list the craft-i18n crate reads.
+/// `CRAFT_I18N` from `CRAFT_I18N_DIR`, or `<workspace_root>/craft-i18n/locales` when present:
+/// the `Embedded` list the craft-i18n crate reads.
 fn craft_i18n() -> String {
     println!("cargo::rerun-if-env-changed=CRAFT_I18N_DIR");
     println!("cargo::rerun-if-env-changed=CRAFT_I18N_REQUIRED");
@@ -53,10 +54,29 @@ fn craft_i18n() -> String {
             }
         },
         None => {
-            if required {
-                println!("cargo::error=CRAFT_I18N_REQUIRED=1 but CRAFT_I18N_DIR is unset: a release must embed the translations");
+            let local_locales = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(std::path::Path::parent)
+                .map(|root| root.join("craft-i18n").join("locales"));
+            if let Some(dir) = &local_locales {
+                println!("cargo::rerun-if-changed={}", dir.display());
             }
-            Vec::new()
+            match local_locales.filter(|dir| dir.is_dir()) {
+                Some(dir) => match locales(&dir) {
+                    Ok(entries) => entries,
+                    Err(e) => {
+                        let level = if required { "error" } else { "warning" };
+                        println!("cargo::{level}=local craft-i18n ({}): {e}; the interface is English only", dir.display());
+                        Vec::new()
+                    }
+                },
+                None => {
+                    if required {
+                        println!("cargo::error=CRAFT_I18N_REQUIRED=1 but CRAFT_I18N_DIR is unset: a release must embed the translations");
+                    }
+                    Vec::new()
+                }
+            }
         }
     };
     let mut o = String::from("/// (locale, shared catalog, PhotoCraft's catalog), one entry per locale; `\"\"` for a missing file.\n");

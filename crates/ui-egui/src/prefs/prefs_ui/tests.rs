@@ -1698,11 +1698,86 @@ fn scratch_disk_browse_sets_only_its_draft_entry_and_cancel_keeps_it() {
     assert_eq!(asked.iter().map(|r| r.kind).collect::<Vec<_>>(), [PickKind::Folder, PickKind::Folder]);
 }
 
-/// The agent settings apply at once, so none of them says "Applies at next launch." (they did before the agent link
-/// followed the preferences live).
+/// The agent and AI assistant settings apply at once, so none of them says "Applies at next launch." (they did before
+/// the agent link followed the preferences live).
 #[test]
 fn integrations_apply_without_a_restart() {
-    for key in ["allowAgentControl", "connectAgents", "controlPort", "readRoot", "writeRoot", "whenAppClosed"] {
+    for key in ["allowAgentControl", "connectAgents", "controlPort", "readRoot", "writeRoot", "whenAppClosed", "aiProvider"] {
         assert!(!super::fields::read_at_launch(&format!("integrations.{key}")), "{key}");
     }
+}
+
+#[test]
+fn ai_provider_preference_persists_and_syncs_to_copilot_state() {
+    let (mut app, store) = app_with_store();
+    let ctx = egui::Context::default();
+    tick(&mut app, &ctx);
+    assert_eq!(app.session.prefs().integrations.ai_provider, prefs::AiProvider::GeminiApi);
+    assert_eq!(app.ui.copilot.ai_provider, crate::ai_backend::AiProviderKind::GeminiApi);
+
+    app.run("prefs.set", json!({"path": "integrations.aiProvider", "value": "antigravityCli"})).unwrap();
+    tick(&mut app, &ctx);
+    assert_eq!(app.session.prefs().integrations.ai_provider, prefs::AiProvider::AntigravityCli);
+    assert_eq!(app.ui.copilot.ai_provider, crate::ai_backend::AiProviderKind::AntigravityCli);
+    assert_eq!(stored(&store)["integrations"]["aiProvider"], json!("antigravityCli"));
+
+    let mut restarted = app_on(&store);
+    tick(&mut restarted, &ctx);
+    assert_eq!(restarted.session.prefs().integrations.ai_provider, prefs::AiProvider::AntigravityCli);
+    assert_eq!(restarted.ui.copilot.ai_provider, crate::ai_backend::AiProviderKind::AntigravityCli);
+}
+
+#[test]
+fn ai_cli_path_overrides_persist_and_invalidate_detection_cache() {
+    let (mut app, store) = app_with_store();
+    let ctx = egui::Context::default();
+    tick(&mut app, &ctx);
+
+    // Prime detection caches so we can confirm preference updates clear them.
+    app.ui.copilot.cli_detection_cache.insert(
+        crate::ai_backend::AiProviderKind::AntigravityCli,
+        crate::cli_agent::CliDetectionStatus::NotFound,
+    );
+    app.ui.copilot.photocraft_cli_detection = Some(crate::cli_agent::CliDetectionStatus::NotFound);
+
+    app.run(
+        "prefs.set",
+        json!({
+            "values": {
+                "integrations.agyCliPath": "C:\\custom\\agy.exe",
+                "integrations.geminiCliPath": "C:\\custom\\gemini.cmd",
+                "integrations.claudeCliPath": "C:\\custom\\claude.exe",
+                "integrations.codexCliPath": "C:\\custom\\codex.cmd",
+                "integrations.photocraftCliPath": "C:\\custom\\photocraft-cli.exe"
+            }
+        }),
+    )
+    .unwrap();
+    tick(&mut app, &ctx);
+
+    let integrations = &app.session.prefs().integrations;
+    assert_eq!(integrations.cli_path_override(prefs::AiProvider::AntigravityCli), "C:\\custom\\agy.exe");
+    assert_eq!(integrations.cli_path_override(prefs::AiProvider::GeminiCli), "C:\\custom\\gemini.cmd");
+    assert_eq!(integrations.cli_path_override(prefs::AiProvider::ClaudeCli), "C:\\custom\\claude.exe");
+    assert_eq!(integrations.cli_path_override(prefs::AiProvider::CodexCli), "C:\\custom\\codex.cmd");
+    assert_eq!(integrations.photocraft_cli_path_override(), "C:\\custom\\photocraft-cli.exe");
+
+    // Changing path overrides must invalidate cached CLI detections.
+    assert!(app.ui.copilot.cli_detection_cache.is_empty());
+    assert!(app.ui.copilot.photocraft_cli_detection.is_none());
+
+    // Stored on disk and survives restart.
+    assert_eq!(stored(&store)["integrations"]["agyCliPath"], json!("C:\\custom\\agy.exe"));
+    assert_eq!(stored(&store)["integrations"]["photocraftCliPath"], json!("C:\\custom\\photocraft-cli.exe"));
+
+    let mut restarted = app_on(&store);
+    tick(&mut restarted, &ctx);
+    assert_eq!(
+        restarted.session.prefs().integrations.cli_path_override(prefs::AiProvider::AntigravityCli),
+        "C:\\custom\\agy.exe"
+    );
+    assert_eq!(
+        restarted.session.prefs().integrations.photocraft_cli_path_override(),
+        "C:\\custom\\photocraft-cli.exe"
+    );
 }

@@ -27,8 +27,8 @@ use crate::panels::brush_panel::brushes::BrushKey;
 
 pub use color_panel::ColorPanelState;
 pub use copilot::{
-    ChatImageAttachment, ChatMessage, ChatRole, CopilotState, ToolActionStatus, ToolCallAction, WorkflowPlan, WorkflowStep, WorkflowStepStatus,
-    estimate_session_tokens, prune_messages_for_context,
+    ChatImageAttachment, ChatMessage, ChatRole, CopilotState, ToolActionStatus, ToolCallAction, ToolCallOrigin, WorkflowPlan, WorkflowStep,
+    WorkflowStepStatus, estimate_session_tokens, prune_messages_for_context,
 };
 pub use panel_state::{CurvesEditorState, PointCurveDrag, PointCurveState};
 pub use text_edit::{TextEdit, TypeInsertionStyle, TypeTransform};

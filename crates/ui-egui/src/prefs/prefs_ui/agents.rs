@@ -15,7 +15,7 @@ use crate::AutomationServices;
 /// suite's `AI-MCP` flag the launcher's switch alone lets agents in; without it a Control Port
 /// saved before the switch (`connect_agents`). While the server runs, agent requests get the
 /// automation policy over the folders chosen; a folder that can't be used is named on the page.
-pub(super) fn sync_agent_link(app: &mut PhotocraftApp, ctx: &egui::Context) {
+pub(crate) fn sync_agent_link(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let integrations = app.session.prefs().integrations.clone();
     let legacy = integrations.connect_agents;
     let allowed = app.services.agent_switch.as_ref().map_or(legacy, |switch| switch.allows(legacy));

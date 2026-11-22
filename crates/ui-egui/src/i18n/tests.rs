@@ -470,3 +470,18 @@ fn language_cache_separates_catalogs_and_keys() {
     with_language(second, || assert_eq!(cache.get_or_build(1, || t("All").to_owned()), "second"));
     with_language(first, || assert_eq!(cache.get_or_build(1, || "unexpected rebuild".to_owned()), "first"));
 }
+
+#[test]
+fn zh_hant_translates_menus_and_ai_sidebar_fallback() {
+    if !needs_catalogs() {
+        return;
+    }
+    let zh = lang("zh-hant");
+    assert_eq!(lang_from_tag("zh-TW"), Some(zh));
+    assert_ne!(tr(zh, "File"), "File");
+    assert_ne!(tr(zh, "Layer"), "Layer");
+    assert_eq!(tr(zh, "AI Assistant"), "AI 助理");
+    assert_eq!(tr(zh, "Enable PhotoCraft MCP Control"), "啟用 PhotoCraft MCP 控制通道");
+    assert_eq!(tr(Lang::EN, "AI Assistant"), "AI Assistant");
+    assert_eq!(tr(zh, "no such label"), "no such label");
+}

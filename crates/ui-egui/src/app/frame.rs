@@ -228,6 +228,7 @@ impl PhotocraftApp {
         // to the view after the pass.
         let mut mode = self.ui.view.screen_mode;
         // The body is the dock layout whose canvas panel draws the document area, or Home.
+        let mut copilot_docked_shown = false;
         AppShell::new(WindowKey::main())
             .window_title(window_title)
             .screen_mode(Bind::bound(&mut mode))
@@ -235,14 +236,20 @@ impl PhotocraftApp {
             .options_bar(options_bar && !home, |ui, _cx, app| panels::options_bar(app, ui))
             .status(status_bar && !home, |ui, _cx, app| panels::status_bar(app, ui))
             .body(|ui, cx, app| {
-                if home {
-                    canvas::document_area(app, ui);
-                } else {
-                    // Shift+Tab hides the panels and keeps the tools: the toolbar is a panel of the dock.
-                    let panels_hidden = cx.shell().is_some_and(|shell| shell.panels_hidden());
-                    crate::panel_docking::show(app, ui, panels_hidden);
-                }
-                notices::show(app, ui);
+                let panels_hidden = cx.shell().is_some_and(|shell| shell.panels_hidden());
+                let show_workspace = |app: &mut PhotocraftApp, ui: &mut egui::Ui| {
+                    if home {
+                        canvas::document_area(app, ui);
+                    } else {
+                        // Shift+Tab hides the panels and keeps the tools: the toolbar is a panel of the dock.
+                        crate::panel_docking::show(app, ui, panels_hidden);
+                    }
+                    notices::show(app, ui);
+                };
+                // Partition AppShell::body explicitly into disjoint workspace (left) and AI sidebar
+                // (right) rects so DockArea's right dock (Color / Properties / Layers) shrinks cleanly
+                // beside the sidebar with zero overlap.
+                copilot_docked_shown = crate::copilot_ui::show_body_with_docked_sidebar(app, ui, show_workspace);
                 smart_svg_ui::host(app, &ui.ctx().clone());
             })
             .show(ui, self);
@@ -254,7 +261,11 @@ impl PhotocraftApp {
         // The Keyboard Shortcuts dialog draws while its session is open.
         prefs_ui::show_shortcuts(self, ui);
         crate::dialogs::run(self, ui);
-        crate::copilot_ui::windows(self, &ctx);
+        if copilot_docked_shown {
+            crate::copilot_ui::show_modals(self, &ctx);
+        } else {
+            crate::copilot_ui::windows(self, &ctx);
+        }
         canvas::extra_windows(self, ui);
         screen_picker::show(self, ui);
         smart_svg_ui::poll(self, &ctx);

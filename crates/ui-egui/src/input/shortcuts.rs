@@ -188,6 +188,7 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
         // Paste is enabled), which a text field ignores: pasting text worked only while
         // PhotoCraft's own clipboard was empty. Give those presses back as the events; Paste asks
         // the window for the clipboard text, which arrives as a Paste event next frame.
+        let has_paste_event = raw.events.iter().any(|e| matches!(e, egui::Event::Paste(_)));
         raw.events.retain_mut(|e| {
             let egui::Event::Key { key, pressed: true, modifiers: m, .. } = *e else { return true };
             if !m.command || m.alt || m.shift {
@@ -197,7 +198,9 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
                 Key::C => *e = egui::Event::Copy,
                 Key::X => *e = egui::Event::Cut,
                 Key::V => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    if !has_paste_event {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                    }
                     return false;
                 }
                 _ => {}
@@ -296,9 +299,15 @@ pub fn clipboard_keys(ctx: &egui::Context, typing: bool, raw: &mut egui::RawInpu
 /// so a second pass in one frame runs only what its own input fired. The main window runs no shortcuts while the
 /// screen color picker is open.
 pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
-    let fired = std::mem::take(&mut app.framework.fired);
+    let mut fired = std::mem::take(&mut app.framework.fired);
     if crate::screen_picker::busy(app) {
         return;
+    }
+    // Raw egui::TextEdit widgets (such as the AI sidebar composer) do not register a craft
+    // `OwnerClass::Text` focus stop, so keyboard-fired canvas shortcuts (edit.paste/copy/cut,
+    // select.all, tool letters, Space) could otherwise fire while the user types or pastes.
+    if crate::copilot_ui::text_input_focused(ctx) {
+        fired.retain(|f| f.source != craft::ui::runtime::commands::FireSource::Key);
     }
     crate::shortcut_dispatch::run_fired(app, ctx, &fired);
     // A held tool letter released: a temporary tool gives the previous one back (#2672).
@@ -337,6 +346,7 @@ fn handle_escape_and_view_keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let esc_taken = crate::canvas::tools::in_gesture(app)
         || crate::direct_select::editing(app)
         || app.ui.text_edit.is_some()
+        || crate::copilot_ui::text_input_focused(ctx)
         || app.ui.palette.open
         || app.ui.canvas_tool_menu.is_some()
         || app.ui.brush_picker.is_some()

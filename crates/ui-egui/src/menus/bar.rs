@@ -1,5 +1,5 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{PoisonError, RwLock};
 
 use craft::menu::{Labeled, MenuBarUi};
 
@@ -41,26 +41,32 @@ struct EnglishNames {
     titles: HashMap<String, String>,
 }
 
-static ENGLISH: RwLock<Option<EnglishNames>> = RwLock::new(None);
+thread_local! {
+    static ENGLISH: RefCell<Option<EnglishNames>> = const { RefCell::new(None) };
+}
 
 /// Keeps [`ENGLISH`] at `model`'s names; copies them only when the model's state changed.
 fn publish_english(model: &items::MenuModel) {
-    let mut names = ENGLISH.write().unwrap_or_else(PoisonError::into_inner);
-    if names.as_ref().map(|n| n.state) != Some(model.state()) {
-        let (labels, titles) = model.english_names();
-        *names = Some(EnglishNames { state: model.state(), labels, titles });
-    }
+    ENGLISH.with(|cell| {
+        let mut names = cell.borrow_mut();
+        if names.as_ref().map(|n| n.state) != Some(model.state()) {
+            let (labels, titles) = model.english_names();
+            *names = Some(EnglishNames { state: model.state(), labels, titles });
+        }
+    });
 }
 
 /// The English name of a command or menu title of the bar's model, for its mnemonics and Help search.
 fn english_name(labeled: Labeled<'_>) -> Option<String> {
-    let names = ENGLISH.read().unwrap_or_else(PoisonError::into_inner);
-    let names = names.as_ref()?;
-    match labeled {
-        Labeled::Command(command) => names.labels.get(&items::command_key(command)).cloned(),
-        Labeled::Title(title) => names.titles.get(title).cloned(),
-        _ => None,
-    }
+    ENGLISH.with(|cell| {
+        let names = cell.borrow();
+        let names = names.as_ref()?;
+        match labeled {
+            Labeled::Command(command) => names.labels.get(&items::command_key(command)).cloned(),
+            Labeled::Title(title) => names.titles.get(title).cloned(),
+            _ => None,
+        }
+    })
 }
 
 /// The English name of a command or menu title of `model`, for the bar's and the palette's search.

@@ -34,8 +34,19 @@ const APPEARANCE_MODE: &str = "interface.appearanceMode";
 const LIGHT_THEME: &str = "interface.lightTheme";
 const DARK_THEME: &str = "interface.darkTheme";
 const FAVORITE_THEMES: &str = "interface.favoriteThemes";
+const AI_PROVIDER: &str = "integrations.aiProvider";
 const GEMINI_API_KEY: &str = "integrations.geminiApiKey";
 const GEMINI_MODEL: &str = "integrations.geminiModel";
+#[cfg(not(target_arch = "wasm32"))]
+const AGY_CLI_PATH: &str = "integrations.agyCliPath";
+#[cfg(not(target_arch = "wasm32"))]
+const GEMINI_CLI_PATH: &str = "integrations.geminiCliPath";
+#[cfg(not(target_arch = "wasm32"))]
+const CLAUDE_CLI_PATH: &str = "integrations.claudeCliPath";
+#[cfg(not(target_arch = "wasm32"))]
+const CODEX_CLI_PATH: &str = "integrations.codexCliPath";
+#[cfg(not(target_arch = "wasm32"))]
+const PHOTOCRAFT_CLI_PATH: &str = "integrations.photocraftCliPath";
 /// The page agents' settings live on, drawn whole by [`craft::automation::ui::agents::AgentsPage`].
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) const AGENTS_PAGE: &str = "integrations";
@@ -105,7 +116,7 @@ impl CustomSettings<PrefPages> for PrefsCustom {
             ui.add_space(12.0);
             ui.separator();
             ui.add_space(8.0);
-            gemini_settings_section(ui, draft);
+            ai_assistant_settings_section(ui, draft);
         }
     }
 
@@ -403,17 +414,203 @@ fn gemini_api_key_row(ui: &mut egui::Ui, draft: &mut SettingsDraft) {
     let current: String = draft.get(GEMINI_API_KEY).unwrap_or_default();
     let mut edited = current.clone();
     Field::new(tl!("Gemini API Key").to_string()).id_salt("gemini-api-key").show(ui, |ui, _| {
-        ui.add(egui::TextEdit::singleline(&mut edited).password(true).desired_width(260.0));
+        TextField::new(tl!("Gemini API Key"), Bind::bound(&mut edited))
+            .masked()
+            .id_salt("gemini-api-key-input")
+            .show(ui);
     });
     if edited != current {
         draft.set(GEMINI_API_KEY, &edited);
     }
 }
 
-/// Gemini assistant settings shown below the Agents page on desktop.
+/// Persistent UI-temp state for the non-blocking CLI environment check inside Preferences.
 #[cfg(not(target_arch = "wasm32"))]
-fn gemini_settings_section(ui: &mut egui::Ui, draft: &mut SettingsDraft) {
-    Text::new(tl!("Gemini Copilot").to_string()).role(TypeRole::BodyStrong).show(ui);
+#[derive(Default)]
+struct CliEnvCheckState {
+    running: bool,
+    rx: Option<std::sync::mpsc::Receiver<crate::cli_agent::CliEnvReport>>,
+    report: Option<crate::cli_agent::CliEnvReport>,
+    error: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cli_env_state_id() -> egui::Id {
+    egui::Id::unique("photocraft-prefs-cli-env-check")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type SharedCliEnvState = std::sync::Arc<std::sync::Mutex<CliEnvCheckState>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn shared_cli_env_state(ctx: &egui::Context) -> SharedCliEnvState {
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_insert_with(cli_env_state_id(), || {
+            std::sync::Arc::new(std::sync::Mutex::new(CliEnvCheckState::default()))
+        })
+        .clone()
+    })
+}
+
+/// Optional custom executable path field (leave blank for automatic PATH / install-dir detection).
+#[cfg(not(target_arch = "wasm32"))]
+fn cli_path_override_row(
+    ui: &mut egui::Ui,
+    draft: &mut SettingsDraft,
+    key: &str,
+    label: &str,
+    salt: &'static str,
+) {
+    let current: String = draft.get(key).unwrap_or_default();
+    let mut edited = current.clone();
+    Field::new(label.to_string()).id_salt(salt).show(ui, |ui, _| {
+        TextField::new(label.to_string(), Bind::bound(&mut edited))
+            .placeholder(tl!("Auto-detect (leave blank)"))
+            .limit(None)
+            .id_salt((salt, "input"))
+            .show(ui);
+    });
+    if edited != current {
+        draft.set(key, &edited);
+    }
+}
+
+/// Polls any in-flight CLI environment check and renders the check button and results list.
+#[cfg(not(target_arch = "wasm32"))]
+fn cli_environment_check_block(ui: &mut egui::Ui, draft: &SettingsDraft) {
+    let ctx = ui.ctx().clone();
+    let shared = shared_cli_env_state(&ctx);
+
+    let (running, report, error) = {
+        let mut guard = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(rx) = guard.rx.as_ref() {
+            match rx.try_recv() {
+                Ok(done) => {
+                    guard.running = false;
+                    guard.rx = None;
+                    guard.report = Some(done);
+                    guard.error = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    guard.running = false;
+                    guard.rx = None;
+                }
+            }
+        }
+        (guard.running, guard.report.clone(), guard.error.clone())
+    };
+
+    ui.add_space(6.0);
+    let button_label = if running { tl!("Checking CLI Environment…") } else { tl!("Check CLI Environment") };
+    if Button::new(button_label).enabled(!running).id_salt("check-cli-env-btn").show(ui).clicked() {
+        let cfg = crate::cli_agent::CliEnvCheckConfig {
+            agy_path: draft.get(AGY_CLI_PATH).unwrap_or_default(),
+            gemini_path: draft.get(GEMINI_CLI_PATH).unwrap_or_default(),
+            claude_path: draft.get(CLAUDE_CLI_PATH).unwrap_or_default(),
+            codex_path: draft.get(CODEX_CLI_PATH).unwrap_or_default(),
+            photocraft_cli_path: draft.get(PHOTOCRAFT_CLI_PATH).unwrap_or_default(),
+        };
+        let wake_ctx = ctx.clone();
+        let wake: crate::ai_backend::WakeCallback = std::sync::Arc::new(move || wake_ctx.request_repaint());
+        let mut guard = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match crate::cli_agent::start_cli_environment_check(cfg, wake) {
+            Ok(rx) => {
+                guard.running = true;
+                guard.rx = Some(rx);
+                guard.error = None;
+            }
+            Err(err) => {
+                guard.running = false;
+                guard.rx = None;
+                guard.error = Some(err);
+            }
+        }
+    }
+
+    if let Some(err) = error {
+        Text::new(err).tone(Tone::Bad).show(ui);
+    }
+
+    if let Some(report) = report {
+        ui.add_space(4.0);
+        for entry in &report.entries {
+            render_cli_env_entry(ui, entry);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn render_cli_env_entry(ui: &mut egui::Ui, entry: &crate::cli_agent::CliEnvEntry) {
+    let (status_line, tone) = match &entry.status {
+        crate::cli_agent::CliDetectionStatus::Found(path) => {
+            let suffix = match (&entry.version, &entry.error) {
+                (Some(ver), _) => format!(" ({ver})"),
+                (None, Some(err)) => format!(" ({err})"),
+                (None, None) => String::new(),
+            };
+            let source = if entry.custom_override_used { tl!("custom") } else { tl!("auto") };
+            let line = format!(
+                "{} ({}): {} [{source}]{suffix} — {}",
+                entry.label,
+                entry.executable,
+                tl!("Found"),
+                path.display()
+            );
+            let tone = if entry.error.is_some() { Tone::Warn } else { Tone::Good };
+            (line, tone)
+        }
+        crate::cli_agent::CliDetectionStatus::NotFound => {
+            let hint = if entry.custom_override_used {
+                tl!("Custom path not found")
+            } else {
+                tl!("Not found")
+            };
+            (format!("{} ({}): {hint}", entry.label, entry.executable), Tone::Warn)
+        }
+        crate::cli_agent::CliDetectionStatus::UnsupportedPlatform => (
+            format!("{} ({}): {}", entry.label, entry.executable, tl!("Desktop only")),
+            Tone::Neutral,
+        ),
+    };
+    Text::new(status_line).role(TypeRole::Caption).tone(tone).show(ui);
+}
+
+/// AI Assistant settings shown below the Agents page on desktop.
+#[cfg(not(target_arch = "wasm32"))]
+fn ai_assistant_settings_section(ui: &mut egui::Ui, draft: &mut SettingsDraft) {
+    Text::new(tl!("AI Assistant").to_string()).role(TypeRole::BodyStrong).show(ui);
+    let current_provider: String = draft.get(AI_PROVIDER).unwrap_or_else(|| prefs::AiProvider::default().name().to_string());
+    let provider_options: Vec<(String, String)> = choices_of(AI_PROVIDER)
+        .into_iter()
+        .map(|(id, label)| (id, tl!(&label).to_string()))
+        .collect();
+    if let Some(next) = choose(ui, tl!("Default AI Provider"), "ai-provider", current_provider.clone(), &provider_options)
+        && next != current_provider
+    {
+        draft.set(AI_PROVIDER, &next);
+    }
+    help(
+        ui,
+        tl!("Local CLI providers (Antigravity, Gemini, Claude, Codex) sign in with your own account and require no API credits."),
+    );
+
+    ui.add_space(6.0);
+    Text::new(tl!("CLI Executable Paths (Optional)").to_string()).role(TypeRole::BodyStrong).show(ui);
+    help(
+        ui,
+        tl!("Leave blank to auto-detect from PATH and standard install folders. You may enter either an executable file or its folder."),
+    );
+    cli_path_override_row(ui, draft, AGY_CLI_PATH, tl!("Antigravity CLI (agy)"), "agy-cli-path");
+    cli_path_override_row(ui, draft, GEMINI_CLI_PATH, tl!("Gemini CLI (gemini)"), "gemini-cli-path");
+    cli_path_override_row(ui, draft, CLAUDE_CLI_PATH, tl!("Claude CLI (claude)"), "claude-cli-path");
+    cli_path_override_row(ui, draft, CODEX_CLI_PATH, tl!("Codex CLI (codex)"), "codex-cli-path");
+    cli_path_override_row(ui, draft, PHOTOCRAFT_CLI_PATH, tl!("PhotoCraft CLI (photocraft-cli)"), "photocraft-cli-path");
+
+    cli_environment_check_block(ui, draft);
+
+    ui.add_space(8.0);
+    Text::new(tl!("Gemini API").to_string()).role(TypeRole::BodyStrong).show(ui);
     gemini_api_key_row(ui, draft);
     let current_model: String = draft.get(GEMINI_MODEL).unwrap_or_else(prefs::default_gemini_model);
     let options: Vec<(String, String)> = prefs::GEMINI_MODELS.iter().map(|m| ((*m).to_string(), (*m).to_string())).collect();

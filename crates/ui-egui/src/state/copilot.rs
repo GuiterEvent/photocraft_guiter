@@ -49,11 +49,22 @@ impl ToolActionStatus {
     }
 }
 
-/// Represents a tool invocation request from Gemini Copilot.
+/// Origin / execution mode of a tool call card in the conversation stream.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolCallOrigin {
+    /// Proposed by the direct Gemini API backend (may require local Apply / Cancel confirmation).
+    #[default]
+    GeminiApi,
+    /// Executed remotely by a local CLI agent (e.g. via PhotoCraft's live MCP control channel).
+    CliAgent,
+}
+
+/// Represents a tool invocation request or live CLI/MCP tool execution card.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolCallAction {
-    /// Tool function name, e.g. "get_document_info", "execute_command", "adjust_layer_property".
+    /// Tool function name, e.g. "get_document_info", "execute_command", "doc_inspect".
     pub name: String,
     /// Arguments provided by the model.
     #[serde(default)]
@@ -66,6 +77,12 @@ pub struct ToolCallAction {
     /// Whether the details card is collapsed/folded in the UI.
     #[serde(default)]
     pub folded: bool,
+    /// Origin distinguishing Gemini API confirmation cards from live CLI/MCP execution cards.
+    #[serde(default)]
+    pub origin: ToolCallOrigin,
+    /// Optional provider correlation key (`call:<id>` or `step:<idx>`) used to update a card in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
 }
 
 /// Status of an individual step in a multi-step macro workflow plan.
@@ -187,6 +204,12 @@ pub struct ChatSession {
     pub updated_at: u64,
     /// Ordered list of messages in this session.
     pub messages: Vec<ChatMessage>,
+    /// External CLI session / thread identifier (e.g. Claude `--resume` session ID), if available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_session_id: Option<String>,
+    /// Provider that owns `cli_session_id`, preventing cross-provider resume mismatches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_session_provider: Option<crate::ai_backend::AiProviderKind>,
 }
 
 impl ChatSession {
@@ -198,6 +221,8 @@ impl ChatSession {
             created_at: now,
             updated_at: now,
             messages: Vec::new(),
+            cli_session_id: None,
+            cli_session_provider: None,
         }
     }
 
@@ -301,6 +326,8 @@ impl ChatMessage {
                 status: ToolActionStatus::Completed,
                 result: Some(result),
                 folded: true,
+                origin: ToolCallOrigin::GeminiApi,
+                call_id: None,
             }),
             workflow_plan: None,
             image: None,
@@ -388,12 +415,46 @@ pub fn prune_messages_for_context(messages: &[ChatMessage], max_tokens: usize) -
     prepend
 }
 
-/// State for the Gemini Copilot AI assistant chat panel.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// Default width of the right-docked AI assistant sidebar in logical points.
+pub const DEFAULT_COPILOT_SIDEBAR_WIDTH: f32 = 360.0;
+/// Minimum resizable width of the right-docked AI assistant sidebar in logical points.
+pub const MIN_COPILOT_SIDEBAR_WIDTH: f32 = 300.0;
+/// Maximum resizable width of the right-docked AI assistant sidebar in logical points.
+pub const MAX_COPILOT_SIDEBAR_WIDTH: f32 = 560.0;
+
+fn default_copilot_docked() -> bool {
+    true
+}
+
+fn default_copilot_sidebar_width() -> f32 {
+    DEFAULT_COPILOT_SIDEBAR_WIDTH
+}
+
+fn default_mcp_enabled() -> bool {
+    true
+}
+
+/// State for the built-in AI assistant sidebar / floating window.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CopilotState {
-    /// Whether the Copilot panel is currently open/visible.
+    /// Whether the AI panel is currently open/visible.
     pub open: bool,
+    /// Whether the panel is docked as a right sidebar (`true`, default) or detached as a floating window (`false`).
+    #[serde(default = "default_copilot_docked")]
+    pub docked: bool,
+    /// Persisted width of the right-docked sidebar in logical points (clamped to 300..=560 px).
+    #[serde(default = "default_copilot_sidebar_width")]
+    pub sidebar_width: f32,
+    /// Active AI backend provider mirrored from `integrations.aiProvider`.
+    #[serde(default)]
+    pub ai_provider: crate::ai_backend::AiProviderKind,
+    /// Whether to allow local CLI agents to attach to PhotoCraft's live MCP control channel when ready.
+    #[serde(default = "default_mcp_enabled")]
+    pub mcp_enabled: bool,
+    /// Explicit opt-in to auto-approve tool calls in non-interactive headless CLI mode.
+    #[serde(default)]
+    pub auto_approve_mcp_tools: bool,
     /// Multi-session collection.
     pub sessions: Vec<ChatSession>,
     /// Identifier of the currently active session.
@@ -402,7 +463,7 @@ pub struct CopilotState {
     pub messages: Vec<ChatMessage>,
     /// Current content of the user input box.
     pub input: String,
-    /// Whether a request is currently in-flight to Gemini.
+    /// Whether a request is currently in-flight to the AI backend.
     #[serde(skip)]
     pub is_loading: bool,
     /// Whether response is actively streaming chunks.
@@ -426,16 +487,131 @@ pub struct CopilotState {
     /// Temporary text buffer for renaming.
     #[serde(skip)]
     pub rename_input: String,
+    /// Cached local CLI detection status per provider so UI rendering never rescans `PATH` every frame.
+    #[serde(skip)]
+    pub cli_detection_cache: std::collections::BTreeMap<crate::ai_backend::AiProviderKind, crate::cli_agent::CliDetectionStatus>,
+    /// Cached detection status for the local `photocraft-cli` binary used for MCP control.
+    #[serde(skip)]
+    pub photocraft_cli_detection: Option<crate::cli_agent::CliDetectionStatus>,
+    /// Last seen CLI binary override strings (`agy`, `gemini`, `claude`, `codex`, `photocraft-cli`)
+    /// so preference edits automatically invalidate cached detection results.
+    #[serde(skip)]
+    pub cli_path_overrides_sig: [String; 5],
+    /// Structured last AI backend error paired with `error_message` for guided recovery UI.
+    #[serde(skip)]
+    pub last_error: Option<crate::ai_backend::AiBackendError>,
+}
+
+impl Default for CopilotState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            docked: default_copilot_docked(),
+            sidebar_width: default_copilot_sidebar_width(),
+            ai_provider: crate::ai_backend::AiProviderKind::default(),
+            mcp_enabled: default_mcp_enabled(),
+            auto_approve_mcp_tools: false,
+            sessions: Vec::new(),
+            active_session_id: String::new(),
+            messages: Vec::new(),
+            input: String::new(),
+            is_loading: false,
+            is_streaming: false,
+            error_message: None,
+            connection_status: None,
+            pending_attachment: None,
+            expanded_image_preview: None,
+            history_drawer_open: false,
+            renaming_session_id: None,
+            rename_input: String::new(),
+            cli_detection_cache: std::collections::BTreeMap::new(),
+            photocraft_cli_detection: None,
+            cli_path_overrides_sig: Default::default(),
+            last_error: None,
+        }
+    }
 }
 
 impl CopilotState {
+    /// Default width (in logical pixels) of the right-docked AI sidebar.
+    pub const DEFAULT_SIDEBAR_WIDTH: f32 = DEFAULT_COPILOT_SIDEBAR_WIDTH;
+    /// Minimum width (in logical pixels) when drag-resizing the docked AI sidebar.
+    pub const MIN_SIDEBAR_WIDTH: f32 = MIN_COPILOT_SIDEBAR_WIDTH;
+    /// Maximum width (in logical pixels) when drag-resizing the docked AI sidebar.
+    pub const MAX_SIDEBAR_WIDTH: f32 = MAX_COPILOT_SIDEBAR_WIDTH;
+
+    /// Returns the saved sidebar width clamped to `[Self::MIN_SIDEBAR_WIDTH, Self::MAX_SIDEBAR_WIDTH]`.
+    pub fn clamped_sidebar_width(&self) -> f32 {
+        if self.sidebar_width.is_finite() {
+            self.sidebar_width.clamp(Self::MIN_SIDEBAR_WIDTH, Self::MAX_SIDEBAR_WIDTH)
+        } else {
+            Self::DEFAULT_SIDEBAR_WIDTH
+        }
+    }
+
+    /// Whether the panel is currently docked on the right side of the workspace.
+    pub fn is_docked(&self) -> bool {
+        self.docked
+    }
+
+    /// Toggles between right-docked sidebar and detached floating window mode.
+    pub fn toggle_docked(&mut self) {
+        self.docked = !self.docked;
+    }
+
     pub fn clear(&mut self) {
         self.messages.clear();
         self.error_message = None;
+        self.last_error = None;
         self.connection_status = None;
         self.pending_attachment = None;
         self.expanded_image_preview = None;
+        self.clear_active_cli_session_id();
         self.sync_active_to_session();
+    }
+
+    /// Records a structured backend error together with its display text.
+    pub fn set_backend_error(&mut self, err: crate::ai_backend::AiBackendError) {
+        self.error_message = Some(err.to_string());
+        self.last_error = Some(err);
+    }
+
+    /// Clears both the display error text and structured backend error state.
+    pub fn clear_error(&mut self) {
+        self.error_message = None;
+        self.last_error = None;
+    }
+
+    /// Returns the stored external CLI session ID for the active session if it belongs to `provider`.
+    pub fn active_cli_session_id(&self, provider: crate::ai_backend::AiProviderKind) -> Option<String> {
+        let sess = self.sessions.iter().find(|s| s.id == self.active_session_id)?;
+        let matches_provider = sess.cli_session_provider.is_none_or(|p| p == provider);
+        if matches_provider {
+            sess.cli_session_id.clone().filter(|id| !id.trim().is_empty())
+        } else {
+            None
+        }
+    }
+
+    /// Records the external CLI session / thread ID for the active chat session.
+    pub fn set_active_cli_session_id(&mut self, provider: crate::ai_backend::AiProviderKind, session_id: String) {
+        if session_id.trim().is_empty() {
+            return;
+        }
+        self.ensure_active_session();
+        if let Some(sess) = self.sessions.iter_mut().find(|s| s.id == self.active_session_id) {
+            sess.cli_session_id = Some(session_id);
+            sess.cli_session_provider = Some(provider);
+            sess.updated_at = current_timestamp();
+        }
+    }
+
+    /// Clears any recorded external CLI session ID on the active chat session.
+    pub fn clear_active_cli_session_id(&mut self) {
+        if let Some(sess) = self.sessions.iter_mut().find(|s| s.id == self.active_session_id) {
+            sess.cli_session_id = None;
+            sess.cli_session_provider = None;
+        }
     }
 
     pub fn add_user_message(&mut self, text: impl Into<String>) {
@@ -496,6 +672,7 @@ impl CopilotState {
         self.messages.clear();
         self.input.clear();
         self.error_message = None;
+        self.last_error = None;
         self.connection_status = None;
         self.pending_attachment = None;
         self.history_drawer_open = false;
@@ -509,6 +686,7 @@ impl CopilotState {
             self.active_session_id = target.id.clone();
             self.messages = target.messages.clone();
             self.error_message = None;
+            self.last_error = None;
             self.connection_status = None;
             self.pending_attachment = None;
             self.history_drawer_open = false;

@@ -284,7 +284,10 @@ impl eframe::App for PhotocraftApp {
         }
         // Native menu clicks become the commands they fire (see `native_menu`).
         native_menu::poll(self, ctx);
-        shortcuts::clipboard_keys(ctx, ctx.text_edit_focused() || self.ui.text_edit.is_some(), raw_input);
+        let typing = ctx.text_edit_focused()
+            || self.ui.text_edit.is_some()
+            || craft::ui::runtime::windows::WindowHost::of(ctx).typing();
+        shortcuts::clipboard_keys(ctx, typing, raw_input);
         #[cfg(not(target_arch = "wasm32"))]
         self.withdraw_stale_input(ctx);
         // A pen held still is no touch screen's press-and-hold right click (stylus.rs).

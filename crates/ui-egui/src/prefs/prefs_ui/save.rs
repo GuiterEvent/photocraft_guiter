@@ -29,11 +29,27 @@ pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context, now: Instant) {
     sync_tooltips(app, ctx);
     app.sync_recent();
     let integrations = &app.session.prefs().integrations;
+    let provider = crate::ai_backend::AiProviderKind::from(integrations.ai_provider);
+    if app.ui.copilot.ai_provider != provider {
+        app.ui.copilot.ai_provider = provider;
+    }
     if app.ui.gemini_api_key != integrations.gemini_api_key {
         app.ui.gemini_api_key = integrations.gemini_api_key.clone();
     }
     if app.ui.gemini_model != integrations.gemini_model {
         app.ui.gemini_model = integrations.gemini_model.clone();
+    }
+    let path_sig = [
+        integrations.agy_cli_path.clone(),
+        integrations.gemini_cli_path.clone(),
+        integrations.claude_cli_path.clone(),
+        integrations.codex_cli_path.clone(),
+        integrations.photocraft_cli_path.clone(),
+    ];
+    if app.ui.copilot.cli_path_overrides_sig != path_sig {
+        app.ui.copilot.cli_path_overrides_sig = path_sig;
+        app.ui.copilot.cli_detection_cache.clear();
+        app.ui.copilot.photocraft_cli_detection = None;
     }
     #[cfg(not(target_arch = "wasm32"))]
     super::agents::sync_agent_link(app, ctx);

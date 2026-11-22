@@ -24,7 +24,22 @@ fn main() {
     println!("cargo::rerun-if-env-changed=CRAFT_FONTS_REQUIRED");
     let wasm = std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|a| a == "wasm32");
     let mut src = String::from("pub static CRAFT_FONTS: &[CraftFont] = &[\n");
-    if let Some(dir) = std::env::var_os("CRAFT_FONTS_DIR").filter(|d| !d.is_empty() && !wasm).map(PathBuf::from) {
+    let resolved_dir = if wasm {
+        None
+    } else if let Some(dir) = std::env::var_os("CRAFT_FONTS_DIR").filter(|d| !d.is_empty()).map(PathBuf::from) {
+        Some(dir)
+    } else {
+        let local_fonts = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .map(|root| root.join("craft-fonts"));
+        if let Some(dir) = &local_fonts {
+            println!("cargo::rerun-if-changed={}", dir.display());
+            println!("cargo::rerun-if-changed={}", dir.join("fonts/manifest.txt").display());
+        }
+        local_fonts.filter(|dir| dir.join("fonts/manifest.txt").is_file())
+    };
+    if let Some(dir) = resolved_dir {
         match craft_fonts(&dir) {
             Ok(entries) => src.push_str(&entries),
             Err(e) if std::env::var_os("CRAFT_FONTS_REQUIRED").is_some() => {

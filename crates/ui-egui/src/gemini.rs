@@ -791,6 +791,9 @@ pub fn chat_messages_to_contents(messages: &[crate::state::ChatMessage]) -> Vec<
                     });
                 }
                 if let Some(tc) = &msg.tool_call {
+                    if tc.origin == crate::state::ToolCallOrigin::CliAgent {
+                        continue;
+                    }
                     parts.push(Part::FunctionCall {
                         function_call: FunctionCall {
                             name: tc.name.clone(),
@@ -1685,6 +1688,8 @@ mod tests {
                     status: ToolActionStatus::Completed,
                     result: Some(serde_json::json!({ "status": "success" })),
                     folded: false,
+                    origin: crate::state::ToolCallOrigin::GeminiApi,
+                    call_id: None,
                 },
             ),
             ChatMessage::tool_response(

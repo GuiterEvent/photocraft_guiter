@@ -24,10 +24,13 @@ macro_rules! tl {
         $crate::i18n::t($s)
     };
 }
+pub mod ai_backend;
 mod brush_mode_menu;
 pub mod canvas;
+pub mod cli_agent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod control;
+pub mod copilot_i18n;
 pub mod copilot_ui;
 pub mod dialogs;
 pub mod dock;

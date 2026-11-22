@@ -259,7 +259,8 @@ fn draft_language(doc: &Doc) -> Option<String> {
 /// The language `code` stands for, `host`'s own where it names none.
 fn language_of(host: &Host, code: &str) -> Lang {
     let Some(i18n) = host.i18n_shared() else { return host.lang() };
-    if code == "auto" { i18n.system_lang() } else { i18n.from_code(code).unwrap_or_else(|| host.lang()) }
+    let code = if code == "auto" { crate::i18n::system_lang().code() } else { code };
+    i18n.from_code(code).unwrap_or_else(|| host.lang())
 }
 
 /// Writes the keys Apply or OK changed through the engine, and returns the `prefs.set` reply. Only these keys go,
@@ -273,6 +274,7 @@ fn write_edits(app: &mut PhotocraftApp, (values, resets): Edits) -> Result<Value
     for path in resets {
         app.run("prefs.reset", json!({"path": path}))?;
     }
+    app.ui.copilot.ai_provider = crate::ai_backend::AiProviderKind::from(app.session.prefs().integrations.ai_provider);
     app.ui.gemini_api_key = app.session.prefs().integrations.gemini_api_key.clone();
     app.ui.gemini_model = app.session.prefs().integrations.gemini_model.clone();
     Ok(reply)

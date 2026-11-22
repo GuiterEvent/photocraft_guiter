@@ -58,6 +58,8 @@ pub(crate) mod shortcuts;
 mod startup;
 
 // PLAN: assumed top-w18's appearance file keeps `display_scale` and `selected_theme` and exports `theme_menu`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use agents::sync_agent_link;
 pub use appearance::{canvas_style, pasteboard_color};
 pub(crate) use appearance::{cycle_appearance, interface_zoom, show_selected_theme, step_brightness, sync_appearance, theme_menu};
 #[cfg(test)]

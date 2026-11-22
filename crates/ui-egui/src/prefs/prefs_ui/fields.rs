@@ -145,7 +145,17 @@ pub(super) fn rules() -> Vec<SettingRule> {
     // The web build has no Agents page (`custom_rows::AGENTS_PAGE`): it shows the settings PhotoCraft had before the
     // ArtCraft Launcher's switch.
     if cfg!(target_arch = "wasm32") {
-        for key in ["connectAgents", "readRoot", "writeRoot", "whenAppClosed"] {
+        for key in [
+            "connectAgents",
+            "readRoot",
+            "writeRoot",
+            "whenAppClosed",
+            "agyCliPath",
+            "geminiCliPath",
+            "claudeCliPath",
+            "codexCliPath",
+            "photocraftCliPath",
+        ] {
             tweak(&mut rules, &format!("integrations.{key}"), |r| r.hidden());
         }
     }
@@ -219,8 +229,14 @@ fn label_override(key: &str) -> Option<&'static str> {
         "lowLatencyDrawing" => "Low-Latency Drawing (vsync off, applies at next launch)",
         "sizeLimitMb" => "Scratch Size Limit (MB, 0 = No Limit)",
         "gpuMemoryMb" => "GPU Memory (MB, 0 = Automatic)",
+        "aiProvider" => "AI Provider",
         "geminiApiKey" => "Gemini API Key",
         "geminiModel" => "Gemini Model",
+        "agyCliPath" => "Antigravity CLI Path (agy)",
+        "geminiCliPath" => "Gemini CLI Path (gemini)",
+        "claudeCliPath" => "Claude CLI Path (claude)",
+        "codexCliPath" => "Codex CLI Path (codex)",
+        "photocraftCliPath" => "PhotoCraft CLI Path (photocraft-cli)",
         _ => return None,
     })
 }
@@ -245,6 +261,11 @@ pub(super) fn choice_label(v: &str) -> String {
         "ahd" => "AHD (adaptive homogeneity)".into(),
         "mhc" => "Malvar–He–Cutler".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
+        "antigravityCli" => "Antigravity CLI (Google account)".into(),
+        "geminiCli" => "Gemini CLI (Google account)".into(),
+        "claudeCli" => "Claude CLI (Claude subscription)".into(),
+        "codexCli" => "Codex CLI (ChatGPT subscription)".into(),
+        "geminiApi" => "Gemini API (API key)".into(),
         v => spelled(v),
     }
 }

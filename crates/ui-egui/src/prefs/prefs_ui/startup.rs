@@ -39,8 +39,19 @@ pub fn load(app: &mut PhotocraftApp) {
     crate::tool_memory::restore(app);
     crate::view_cmds::restore(app);
     app.sync_recent();
-    app.ui.gemini_api_key = app.session.prefs().integrations.gemini_api_key.clone();
-    app.ui.gemini_model = app.session.prefs().integrations.gemini_model.clone();
+    let integrations = &app.session.prefs().integrations;
+    app.ui.copilot.ai_provider = crate::ai_backend::AiProviderKind::from(integrations.ai_provider);
+    app.ui.gemini_api_key = integrations.gemini_api_key.clone();
+    app.ui.gemini_model = integrations.gemini_model.clone();
+    app.ui.copilot.cli_path_overrides_sig = [
+        integrations.agy_cli_path.clone(),
+        integrations.gemini_cli_path.clone(),
+        integrations.claude_cli_path.clone(),
+        integrations.codex_cli_path.clone(),
+        integrations.photocraft_cli_path.clone(),
+    ];
+    app.ui.copilot.cli_detection_cache.clear();
+    app.ui.copilot.photocraft_cli_detection = None;
     // The store holds what was loaded; only a change from here on is handed to it.
     app.prefs_rt.saved_rev = app.session.prefs.rev();
     if !reset.is_empty() {

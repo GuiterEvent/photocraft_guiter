@@ -1300,3 +1300,45 @@ fn a_saved_control_port_turns_the_agent_connection_on() {
     assert!(!load(r#"{"integrations":{"controlPort":7878,"connectAgents":false}}"#).connect_agents, "an explicit choice wins");
     assert!(!load("{}").connect_agents, "off by default");
 }
+
+#[test]
+fn ai_provider_pref_defaults_validates_and_loads_legacy_files() {
+    let mut s = session();
+    assert_eq!(s.prefs().integrations.ai_provider, AiProvider::GeminiApi);
+    assert_eq!(s.execute("prefs.get", json!({"path": "integrations.aiProvider"})).unwrap(), json!("geminiApi"));
+    assert_eq!(choices("integrations.aiProvider"), Some(AiProvider::NAMES));
+
+    for (raw, expected) in [
+        ("antigravityCli", AiProvider::AntigravityCli),
+        ("geminiCli", AiProvider::GeminiCli),
+        ("claudeCli", AiProvider::ClaudeCli),
+        ("codexCli", AiProvider::CodexCli),
+        ("geminiApi", AiProvider::GeminiApi),
+    ] {
+        s.execute("prefs.set", json!({"path": "integrations.aiProvider", "value": raw})).unwrap();
+        assert_eq!(s.prefs().integrations.ai_provider, expected);
+        assert_eq!(AiProvider::parse(raw), Some(expected));
+    }
+    assert_eq!(AiProvider::NAMES.first(), Some(&"antigravityCli"));
+
+    s.execute("prefs.set", json!({"path": "integrations.aiProvider", "value": "claudeCli"})).unwrap();
+    for bad in [json!("openai"), json!(1), json!(true), json!(null)] {
+        assert!(s.execute("prefs.set", json!({"path": "integrations.aiProvider", "value": bad})).is_err());
+    }
+    assert_eq!(s.prefs().integrations.ai_provider, AiProvider::ClaudeCli, "rejected values change nothing");
+
+    let mut restored = Session::new();
+    restored.load_prefs_json(&s.prefs_to_json()).unwrap();
+    assert_eq!(restored.prefs().integrations.ai_provider, AiProvider::ClaudeCli);
+
+    // Older preference files without `aiProvider` upgrade smoothly to Gemini API.
+    let mut legacy = Session::new();
+    let invalid = legacy.load_prefs_json(r#"{"integrations":{"geminiApiKey":"sk-legacy","geminiModel":"gemini-2.5-pro"}}"#).unwrap();
+    assert!(invalid.is_empty(), "{invalid:?}");
+    assert_eq!(legacy.prefs().integrations.ai_provider, AiProvider::GeminiApi);
+    assert_eq!(legacy.prefs().integrations.gemini_api_key, "sk-legacy");
+    assert_eq!(legacy.prefs().integrations.gemini_model, "gemini-2.5-pro");
+
+    s.execute("prefs.reset", json!({"path": "integrations.aiProvider"})).unwrap();
+    assert_eq!(s.prefs().integrations.ai_provider, AiProvider::GeminiApi);
+}

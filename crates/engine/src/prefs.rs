@@ -1255,9 +1255,21 @@ pub fn default_gemini_model() -> String {
     "gemini-2.5-flash".to_string()
 }
 
+choice!(
+    /// Active AI backend provider for the built-in AI assistant sidebar.
+    /// Defaults to `geminiApi` so existing configurations with a Gemini API key upgrade smoothly.
+    AiProvider {
+        AntigravityCli = "antigravityCli",
+        GeminiCli = "geminiCli",
+        ClaudeCli = "claudeCli",
+        CodexCli = "codexCli",
+        GeminiApi = "geminiApi",
+    } default GeminiApi
+);
+
 /// Preferences › Agents: the framework's agent settings, saved flat in the `integrations` section
 /// (`allowAgentControl`, `controlPort`, `readRoot`, `writeRoot`, `whenAppClosed`), PhotoCraft's
-/// consent from before the ArtCraft Launcher's switch, and Gemini assistant settings.
+/// consent from before the ArtCraft Launcher's switch, and AI assistant settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Integrations {
@@ -1269,11 +1281,23 @@ pub struct Integrations {
     /// Port ([`migrate_integrations`]); not in the dialog. With the flag the ArtCraft Launcher's
     /// switch decides instead.
     pub connect_agents: bool,
+    /// Selected AI backend provider for the built-in AI sidebar.
+    pub ai_provider: AiProvider,
     /// Gemini API key for assistant features.
     pub gemini_api_key: String,
     /// Selected Gemini model.
     #[serde(default = "default_gemini_model")]
     pub gemini_model: String,
+    /// Optional custom executable path override for Antigravity CLI (`agy`). Empty = auto-detect.
+    pub agy_cli_path: String,
+    /// Optional custom executable path override for Gemini CLI (`gemini`). Empty = auto-detect.
+    pub gemini_cli_path: String,
+    /// Optional custom executable path override for Claude CLI (`claude`). Empty = auto-detect.
+    pub claude_cli_path: String,
+    /// Optional custom executable path override for Codex CLI (`codex`). Empty = auto-detect.
+    pub codex_cli_path: String,
+    /// Optional custom executable path override for `photocraft-cli`. Empty = auto-detect.
+    pub photocraft_cli_path: String,
 }
 
 impl Default for Integrations {
@@ -1281,9 +1305,33 @@ impl Default for Integrations {
         Self {
             agents: AgentSettings::default(),
             connect_agents: false,
+            ai_provider: AiProvider::default(),
             gemini_api_key: String::new(),
             gemini_model: default_gemini_model(),
+            agy_cli_path: String::new(),
+            gemini_cli_path: String::new(),
+            claude_cli_path: String::new(),
+            codex_cli_path: String::new(),
+            photocraft_cli_path: String::new(),
         }
+    }
+}
+
+impl Integrations {
+    /// Returns the optional custom CLI executable path override configured for `provider`.
+    pub fn cli_path_override(&self, provider: AiProvider) -> &str {
+        match provider {
+            AiProvider::AntigravityCli => self.agy_cli_path.trim(),
+            AiProvider::GeminiCli => self.gemini_cli_path.trim(),
+            AiProvider::ClaudeCli => self.claude_cli_path.trim(),
+            AiProvider::CodexCli => self.codex_cli_path.trim(),
+            AiProvider::GeminiApi => "",
+        }
+    }
+
+    /// Returns the optional custom executable path override configured for `photocraft-cli`.
+    pub fn photocraft_cli_path_override(&self) -> &str {
+        self.photocraft_cli_path.trim()
     }
 }
 

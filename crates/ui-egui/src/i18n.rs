@@ -443,7 +443,14 @@ pub fn t(s: &str) -> &str {
 
 /// Translate an English UI string; unknown strings come back unchanged.
 pub fn tr(lang: Lang, s: &str) -> &str {
-    lang.i18n().t(lang.lang, s)
+    let translated = lang.i18n().t(lang.lang, s);
+    if translated == s
+        && lang.code() == "zh-hant"
+        && let Some(fallback) = crate::copilot_i18n::zh_hant(s)
+    {
+        return fallback;
+    }
+    translated
 }
 
 /// Like [`tr`], for an English string that needs a disambiguating `context`.

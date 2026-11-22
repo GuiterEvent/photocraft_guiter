@@ -1,0 +1,22 @@
+# PhotoCraft AI 側邊欄待辦與已知限制記錄（Bug / Backlog）
+
+## [Backlog #1] 免點數 AI 側邊欄無法僅靠單一 `photocraft.exe` 開箱即用（需額外安裝外部 CLI 與搭配 `photocraft-cli`）
+- 記錄時間：2026-11-22 22:37
+- 類型：使用體驗限制 / 後續改善項目（Enhancement）
+- 現況說明：
+  1. **僅靠單一 `photocraft.exe` 時**：
+     - 只能使用 **Gemini API** 模式（需使用者自行填寫 Google Gemini API Key，且目前僅內建 5 個基礎工具，無法像 MCP 一樣操控全部引擎指令）。
+  2. **使用「免 API 點數＋完整 MCP 控制」的 CLI Agent 模式時**，目前仍需額外元件，無法單檔開箱即用：
+     - 需搭配同目錄（或 `PATH`）上的 **`photocraft-cli.exe`**（負責提供 `photocraft-cli mcp` 控制橋接；安裝包／`build.bat` 產物已內附，但若只單獨複製 `photocraft.exe` 則會缺少）。
+     - 需於使用者電腦額外安裝並完成一次帳號登入的外部 AI CLI（擇一）：
+       - **Antigravity CLI（`agy`）**：`irm https://antigravity.google/cli/install.ps1 | iex`（Windows），執行 `agy` 登入 Google / Antigravity 帳號。
+       - **Claude CLI（`claude`）**：安裝並登入 Claude 訂閱帳號。
+       - **Codex CLI（`codex`）**：安裝並登入 ChatGPT 訂閱帳號。
+       - **Gemini CLI（`gemini`）**：需 Node.js + `@google/gemini-cli`（個人免費帳號登入已由 Google 遷移至 Antigravity）。
+- 後續改善方向（以後再做）：
+  1. **一鍵安裝與新手引導精靈**：在側邊欄未偵測到外部 CLI 時，提供清楚的步驟卡片（含一鍵複製安裝指令、開啟終端機登入、自動重新偵測與狀態檢查），降低一般使用者門檻。
+  2. **改善 `photocraft-cli` 相依性**：評估讓主程式（或打包結構）確保 `photocraft-cli` 永遠隨附，或探索內建直接執行全部引擎指令的統一工具層，減少跨行程橋接需求。
+  3. **擴充單檔可直連的多供應商與本機模型**：
+     - 加入 **Ollama / LM Studio**（本機免費模型）與 **通用 OpenAI 相容端點**。
+     - 將內建直連模式（API / 本機模型）的 Function Calling 工具擴充至完整涵蓋 PhotoCraft 引擎指令（例如 `command_list`、`command_run`、`doc_inspect`、`doc_render_preview` 等），使單一 `photocraft.exe` 不靠外部 MCP 也能完整控制畫布。
+  4. **追蹤開放標準與官方授權整合**：持續關注 ACP（Agent Client Protocol）或官方 OAuth 授權方式，評估未來是否能進一步簡化免點數登入流程。
